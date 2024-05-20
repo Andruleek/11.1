@@ -1,9 +1,13 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
+from flask_wtf import FlaskForm
+from wtforms import StringField, DateField
+from wtforms.validators import DataRequired, Email, Length
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///contacts.db'
+app.config['SECRET_KEY'] = 'your_secret_key'
 db = SQLAlchemy(app)
 
 class Contact(db.Model):
@@ -23,79 +27,60 @@ class Contact(db.Model):
         self.birthday = datetime.strptime(birthday, '%Y-%m-%d')
         self.additional_data = additional_data
 
+class ContactForm(FlaskForm):
+    first_name = StringField('First Name', validators=[DataRequired(), Length(max=50)])
+    last_name = StringField('Last Name', validators=[DataRequired(), Length(max=50)])
+    email = StringField('Email', validators=[DataRequired(), Email(), Length(max=100)])
+    phone_number = StringField('Phone Number', validators=[DataRequired(), Length(max=20)])
+    birthday = DateField('Birthday', format='%Y-%m-%d', validators=[DataRequired()])
+    additional_data = StringField('Additional Data', validators=[Length(max=200)])
+
 @app.route('/')
 def home():
-    return 'Welcome to the Contacts App!'
+    return 'Ласкаво просимо до програми Контакти!'
 
 @app.route('/contacts', methods=['POST'])
-def create_contact():
+def create_contact_api():
     data = request.get_json()
-    new_contact = Contact(
-        first_name=data['first_name'],
-        last_name=data['last_name'],
-        email=data['email'],
-        phone_number=data['phone_number'],
-        birthday=data['birthday'],
-        additional_data=data.get('additional_data')
-    )
-    db.session.add(new_contact)
-    db.session.commit()
-    return jsonify({'message': 'Contact created successfully'}), 201
+    try:
+        new_contact = Contact(
+            first_name=data['first_name'],
+            last_name=data['last_name'],
+            email=data['email'],
+            phone_number=data['phone_number'],
+            birthday=data['birthday'],
+            additional_data=data.get('additional_data')
+        )
+        db.session.add(new_contact)
+        db.session.commit()
+        return jsonify({'message': 'Контакт успішно створено'}), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
 
-@app.route('/contacts/<contact_id>', methods=['GET'])
-def get_contact(contact_id):
-    contact = Contact.query.get(contact_id)
-    if not contact:
-        return jsonify({'message': 'Contact not found'}), 404
-    contact_data = {
-        'id': contact.id,
-        'first_name': contact.first_name,
-        'last_name': contact.last_name,
-        'email': contact.email,
-        'phone_number': contact.phone_number,
-        'birthday': contact.birthday.strftime('%Y-%m-%d'),
-        'additional_data': contact.additional_data
-    }
-    return jsonify(contact_data), 200
+@app.route('/contacts/form', methods=['GET', 'POST'])
+def create_contact_form():
+    form = ContactForm()
+    if form.validate_on_submit():
+        try:
+            new_contact = Contact(
+                first_name=form.first_name.data,
+                last_name=form.last_name.data,
+                email=form.email.data,
+                phone_number=form.phone_number.data,
+                birthday=form.birthday.data.strftime('%Y-%m-%d'),
+                additional_data=form.additional_data.data
+            )
+            db.session.add(new_contact)
+            db.session.commit()
+            flash('Contact created successfully!', 'success')
+            return redirect(url_for('create_contact_form'))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Failed to create contact: {e}', 'danger')
+    return render_template('create_contact.html', form=form)
 
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
     app.run(debug=True)
 
-# Command-line interface for interacting with the contacts database
-while True:
-    command = input("Введіть команду: ").lower()
-
-    if command == "hello":
-        print("How can I help you?")
-
-    elif command.startswith("add"):
-        parts = command.split()
-        if len(parts) == 6:  # There are 6 parts because 'split()' divides by spaces, and your data has 5 fields
-            first_name = parts[1]
-            last_name = parts[2]
-            email = parts[3]
-            phone_number = parts[4]
-            birthday = parts[5]
-            # Save the contact to the database
-            with app.app_context():
-                new_contact = Contact(
-                    first_name=first_name,
-                    last_name=last_name,
-                    email=email,
-                    phone_number=phone_number,
-                    birthday=birthday
-                )
-                db.session.add(new_contact)
-                db.session.commit()
-                print(f"Контакт {first_name} з номером {phone_number} успішно додано!")
-        else:
-            print("Формат команди неправильний. Використовуйте: add [ім'я] [прізвище] [електронна пошта] [номер телефону] [дата народження]")
-
-    elif command == "exit":
-        print("До побачення!")
-        break
-
-    else:
-        print("Невідома команда. Спробуйте ще раз.")
